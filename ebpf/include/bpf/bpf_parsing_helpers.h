@@ -31,7 +31,7 @@
 
 /* Header cursor to keep track of current parsing position */
 struct hdr_cursor {
-    void *pos;
+  void *pos;
 };
 
 /*
@@ -40,8 +40,8 @@ struct hdr_cursor {
  *	@h_vlan_encapsulated_proto: packet type ID or len
  */
 struct vlan_hdr {
-    __be16 h_vlan_TCI;
-    __be16 h_vlan_encapsulated_proto;
+  __be16 h_vlan_TCI;
+  __be16 h_vlan_encapsulated_proto;
 };
 
 /*
@@ -49,9 +49,9 @@ struct vlan_hdr {
  * structures.
  */
 struct icmphdr_common {
-    __u8 type;
-    __u8 code;
-    __sum16 cksum;
+  __u8 type;
+  __u8 code;
+  __sum16 cksum;
 };
 
 /* Allow users of header file to redefine VLAN max depth */
@@ -62,12 +62,12 @@ struct icmphdr_common {
 #define VLAN_VID_MASK 0x0fff /* VLAN Identifier */
 /* Struct for collecting VLANs after parsing via parse_ethhdr_vlan */
 struct collect_vlans {
-    __u16 id[VLAN_MAX_DEPTH];
+  __u16 id[VLAN_MAX_DEPTH];
 };
 
 static __always_inline int proto_is_vlan(__u16 h_proto) {
-    return !!(h_proto == bpf_htons(ETH_P_8021Q) ||
-              h_proto == bpf_htons(ETH_P_8021AD));
+  return !!(h_proto == bpf_htons(ETH_P_8021Q) ||
+            h_proto == bpf_htons(ETH_P_8021AD));
 }
 
 /* Notice, parse_ethhdr() will skip VLAN tags, by advancing nh->pos and returns
@@ -79,118 +79,118 @@ static __always_inline int parse_ethhdr_vlan(struct hdr_cursor *nh,
                                              void *data_end,
                                              struct ethhdr **ethhdr,
                                              struct collect_vlans *vlans) {
-    struct ethhdr *eth = nh->pos;
-    int hdrsize = sizeof(*eth);
-    struct vlan_hdr *vlh;
-    __u16 h_proto;
-    int i;
+  struct ethhdr *eth = nh->pos;
+  int hdrsize = sizeof(*eth);
+  struct vlan_hdr *vlh;
+  __u16 h_proto;
+  int i;
 
-    /* Byte-count bounds check; check if current pointer + size of header
-     * is after data_end.
-     */
-    if (nh->pos + hdrsize > data_end) return -1;
+  /* Byte-count bounds check; check if current pointer + size of header
+   * is after data_end.
+   */
+  if (nh->pos + hdrsize > data_end) return -1;
 
-    nh->pos += hdrsize;
-    *ethhdr = eth;
-    vlh = nh->pos;
-    h_proto = eth->h_proto;
+  nh->pos += hdrsize;
+  *ethhdr = eth;
+  vlh = nh->pos;
+  h_proto = eth->h_proto;
 
 /* Use loop unrolling to avoid the verifier restriction on loops;
  * support up to VLAN_MAX_DEPTH layers of VLAN encapsulation.
  */
 #pragma unroll
-    for (i = 0; i < VLAN_MAX_DEPTH; i++) {
-        if (!proto_is_vlan(h_proto)) break;
+  for (i = 0; i < VLAN_MAX_DEPTH; i++) {
+    if (!proto_is_vlan(h_proto)) break;
 
-        if ((void *)(vlh + 1) > data_end) break;
+    if ((void *)(vlh + 1) > data_end) break;
 
-        h_proto = vlh->h_vlan_encapsulated_proto;
-        if (vlans) /* collect VLAN ids */
-            vlans->id[i] = (bpf_ntohs(vlh->h_vlan_TCI) & VLAN_VID_MASK);
+    h_proto = vlh->h_vlan_encapsulated_proto;
+    if (vlans) /* collect VLAN ids */
+      vlans->id[i] = (bpf_ntohs(vlh->h_vlan_TCI) & VLAN_VID_MASK);
 
-        vlh++;
-    }
+    vlh++;
+  }
 
-    nh->pos = vlh;
-    return h_proto; /* network-byte-order */
+  nh->pos = vlh;
+  return h_proto; /* network-byte-order */
 }
 
 static __always_inline int parse_ethhdr(struct hdr_cursor *nh, void *data_end,
                                         struct ethhdr **ethhdr) {
-    /* Expect compiler removes the code that collects VLAN ids */
-    return parse_ethhdr_vlan(nh, data_end, ethhdr, NULL);
+  /* Expect compiler removes the code that collects VLAN ids */
+  return parse_ethhdr_vlan(nh, data_end, ethhdr, NULL);
 }
 
 static __always_inline int parse_ip6hdr(struct hdr_cursor *nh, void *data_end,
                                         struct ipv6hdr **ip6hdr) {
-    struct ipv6hdr *ip6h = nh->pos;
+  struct ipv6hdr *ip6h = nh->pos;
 
-    /* Pointer-arithmetic bounds check; pointer +1 points to after end of
-     * thing being pointed to. We will be using this style in the remainder
-     * of the tutorial.
-     */
-    if ((void *)(ip6h + 1) > data_end) return -1;
+  /* Pointer-arithmetic bounds check; pointer +1 points to after end of
+   * thing being pointed to. We will be using this style in the remainder
+   * of the tutorial.
+   */
+  if ((void *)(ip6h + 1) > data_end) return -1;
 
-    nh->pos = ip6h + 1;
-    *ip6hdr = ip6h;
+  nh->pos = ip6h + 1;
+  *ip6hdr = ip6h;
 
-    return ip6h->nexthdr;
+  return ip6h->nexthdr;
 }
 
 static __always_inline int parse_iphdr(struct hdr_cursor *nh, void *data_end,
                                        struct iphdr **iphdr) {
-    struct iphdr *iph = nh->pos;
-    int hdrsize;
+  struct iphdr *iph = nh->pos;
+  int hdrsize;
 
-    if ((void *)(iph + 1) > data_end) return -1;
+  if ((void *)(iph + 1) > data_end) return -1;
 
-    hdrsize = iph->ihl * 4;
-    /* Sanity check packet field is valid */
-    if (hdrsize < sizeof(*iph)) return -1;
+  hdrsize = iph->ihl * 4;
+  /* Sanity check packet field is valid */
+  if (hdrsize < sizeof(*iph)) return -1;
 
-    /* Variable-length IPv4 header, need to use byte-based arithmetic */
-    if (nh->pos + hdrsize > data_end) return -1;
+  /* Variable-length IPv4 header, need to use byte-based arithmetic */
+  if (nh->pos + hdrsize > data_end) return -1;
 
-    nh->pos += hdrsize;
-    *iphdr = iph;
+  nh->pos += hdrsize;
+  *iphdr = iph;
 
-    return iph->protocol;
+  return iph->protocol;
 }
 
 static __always_inline int parse_icmp6hdr(struct hdr_cursor *nh, void *data_end,
                                           struct icmp6hdr **icmp6hdr) {
-    struct icmp6hdr *icmp6h = nh->pos;
+  struct icmp6hdr *icmp6h = nh->pos;
 
-    if ((void *)(icmp6h + 1) > data_end) return -1;
+  if ((void *)(icmp6h + 1) > data_end) return -1;
 
-    nh->pos = icmp6h + 1;
-    *icmp6hdr = icmp6h;
+  nh->pos = icmp6h + 1;
+  *icmp6hdr = icmp6h;
 
-    return icmp6h->icmp6_type;
+  return icmp6h->icmp6_type;
 }
 
 static __always_inline int parse_icmphdr(struct hdr_cursor *nh, void *data_end,
                                          struct icmphdr **icmphdr) {
-    struct icmphdr *icmph = nh->pos;
+  struct icmphdr *icmph = nh->pos;
 
-    if ((void *)(icmph + 1) > data_end) return -1;
+  if ((void *)(icmph + 1) > data_end) return -1;
 
-    nh->pos = icmph + 1;
-    *icmphdr = icmph;
+  nh->pos = icmph + 1;
+  *icmphdr = icmph;
 
-    return icmph->type;
+  return icmph->type;
 }
 
 static __always_inline int parse_icmphdr_common(
     struct hdr_cursor *nh, void *data_end, struct icmphdr_common **icmphdr) {
-    struct icmphdr_common *h = nh->pos;
+  struct icmphdr_common *h = nh->pos;
 
-    if ((void *)(h + 1) > data_end) return -1;
+  if ((void *)(h + 1) > data_end) return -1;
 
-    nh->pos = h + 1;
-    *icmphdr = h;
+  nh->pos = h + 1;
+  *icmphdr = h;
 
-    return h->type;
+  return h->type;
 }
 
 /*
@@ -198,18 +198,18 @@ static __always_inline int parse_icmphdr_common(
  */
 static __always_inline int parse_udphdr(struct hdr_cursor *nh, void *data_end,
                                         struct udphdr **udphdr) {
-    int len;
-    struct udphdr *h = nh->pos;
+  int len;
+  struct udphdr *h = nh->pos;
 
-    if ((void *)(h + 1) > data_end) return -1;
+  if ((void *)(h + 1) > data_end) return -1;
 
-    nh->pos = h + 1;
-    *udphdr = h;
+  nh->pos = h + 1;
+  *udphdr = h;
 
-    len = bpf_ntohs(h->len) - sizeof(struct udphdr);
-    if (len < 0) return -1;
+  len = bpf_ntohs(h->len) - sizeof(struct udphdr);
+  if (len < 0) return -1;
 
-    return len;
+  return len;
 }
 
 /*
@@ -217,53 +217,53 @@ static __always_inline int parse_udphdr(struct hdr_cursor *nh, void *data_end,
  */
 static __always_inline int parse_tcphdr(struct hdr_cursor *nh, void *data_end,
                                         struct tcphdr **tcphdr) {
-    int len;
-    struct tcphdr *h = nh->pos;
+  int len;
+  struct tcphdr *h = nh->pos;
 
-    if ((void *)(h + 1) > data_end) return -1;
+  if ((void *)(h + 1) > data_end) return -1;
 
-    len = h->doff * 4;
-    /* Sanity check packet field is valid */
-    if (len < sizeof(*h)) return -1;
+  len = h->doff * 4;
+  /* Sanity check packet field is valid */
+  if (len < sizeof(*h)) return -1;
 
-    /* Variable-length TCP header, need to use byte-based arithmetic */
-    if (nh->pos + len > data_end) return -1;
+  /* Variable-length TCP header, need to use byte-based arithmetic */
+  if (nh->pos + len > data_end) return -1;
 
-    nh->pos += len;
-    *tcphdr = h;
+  nh->pos += len;
+  *tcphdr = h;
 
-    return len;
+  return len;
 }
 
 /*
  * Swaps destination and source MAC addresses inside an Ethernet header
  */
 static __always_inline void swap_src_dst_mac(struct ethhdr *eth) {
-    __u8 h_tmp[ETH_ALEN];
+  __u8 h_tmp[ETH_ALEN];
 
-    __builtin_memcpy(h_tmp, eth->h_source, ETH_ALEN);
-    __builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
-    __builtin_memcpy(eth->h_dest, h_tmp, ETH_ALEN);
+  __builtin_memcpy(h_tmp, eth->h_source, ETH_ALEN);
+  __builtin_memcpy(eth->h_source, eth->h_dest, ETH_ALEN);
+  __builtin_memcpy(eth->h_dest, h_tmp, ETH_ALEN);
 }
 
 /*
  * Swaps destination and source IPv4 addresses inside an IPv4 header
  */
 static __always_inline void swap_src_dst_ipv4(struct iphdr *iphdr) {
-    __be32 tmp = iphdr->saddr;
+  __be32 tmp = iphdr->saddr;
 
-    iphdr->saddr = iphdr->daddr;
-    iphdr->daddr = tmp;
+  iphdr->saddr = iphdr->daddr;
+  iphdr->daddr = tmp;
 }
 
 /*
  * Swaps destination and source port in tcp header
  */
 static __always_inline void swap_src_dst_tcp_port(struct tcphdr *tcphdr) {
-    __be16 tmp = tcphdr->source;
+  __be16 tmp = tcphdr->source;
 
-    tcphdr->source = tcphdr->dest;
-    tcphdr->dest = tmp;
+  tcphdr->source = tcphdr->dest;
+  tcphdr->dest = tmp;
 }
 
 #endif /* __BPF_PARSING_HELPERS_H */

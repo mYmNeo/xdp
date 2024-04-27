@@ -54,16 +54,17 @@ type TCPConn struct {
 	listener net.Listener
 	conn     net.Conn
 	key      uint64
-	dscp     uint8
+	dscp     int
 
 	// packets channel
 	inbound  chan message
 	outbound chan message
 	opts     *gopacket.SerializeOptions
 
-	getHeader func(ip net.IP, port int) []byte
-	getBuffer func() gopacket.SerializeBuffer
-	closeFunc func(key uint64)
+	getHeader    func(ip net.IP, port int) []byte
+	getBuffer    func() gopacket.SerializeBuffer
+	getConnected func() []uint64
+	closeFunc    func(key uint64)
 }
 
 var (
@@ -123,6 +124,7 @@ func NewTCPWrapper(interfaceName string) (*TCPWrapper, error) {
 
 	baseWrapper.readLoop()
 	baseWrapper.writeLoop()
+	go baseWrapper.cleaner()
 
 	return baseWrapper, nil
 }
@@ -158,6 +160,22 @@ func (w *TCPWrapper) Shutdown() (err error) {
 	w.conns.Close()
 
 	return
+}
+
+func (w *TCPWrapper) cleaner() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		w.conns.Range(func(key uint64, conn *TCPConn) bool {
+			if len(w.xdp.prog.GetConntrackDataByKey(key)) == 0 {
+				ip, port := ebpf.RetrieveIPPort(key)
+				log.Printf("Removed dead %s:%d", ip, port)
+				w.conns.Delete(key)
+			}
+			return true
+		})
+	}
 }
 
 func (w *TCPWrapper) readLoop() {
@@ -204,7 +222,6 @@ func (w *TCPWrapper) readLoop() {
 					}
 
 					if ok {
-						log.Printf("received packet from %s:%d to %s:%d, size:%d\n", ip.SrcIP, tcp.SrcPort, ip.DstIP, tcp.DstPort, len(tcp.Payload))
 						m := message{
 							recv: tcp.Payload,
 							addr: &net.TCPAddr{
@@ -276,28 +293,33 @@ func (w *TCPWrapper) getBuffer() gopacket.SerializeBuffer {
 }
 
 func (w *TCPWrapper) Dial(network, address string) (*TCPConn, error) {
+	raddr, err := net.ResolveTCPAddr("tcp", address)
+	if err != nil {
+		return nil, err
+	}
+	w.xdp.prog.AddToWhitelist(raddr.IP, raddr.Port)
+
 	conn, err := net.Dial(network, address)
 	if err != nil {
 		return nil, err
 	}
 
-	tcpAddr, ok := conn.LocalAddr().(*net.TCPAddr)
+	laddr, ok := conn.LocalAddr().(*net.TCPAddr)
 	if !ok {
 		return nil, fmt.Errorf("not a tcp addres")
 	}
-	w.xdp.prog.AddToWhitelist(tcpAddr.IP, tcpAddr.Port)
 
 	tcpconn := &TCPConn{
 		outbound:  w.outbound,
 		inbound:   make(chan message, 1024),
 		die:       make(chan struct{}),
 		conn:      conn,
-		key:       ebpf.GetKey(tcpAddr.IP, tcpAddr.Port),
+		key:       ebpf.GetKey(laddr.IP, laddr.Port),
 		opts:      &w.opts,
 		closeFunc: w.conns.Delete,
 		getBuffer: w.getBuffer,
 		getHeader: func(ip net.IP, port int) []byte {
-			return w.xdp.prog.GetConnstrackData(ip, port)
+			return w.xdp.prog.GetConntrackData(laddr.IP, laddr.Port)
 		},
 	}
 
@@ -308,14 +330,20 @@ func (w *TCPWrapper) Dial(network, address string) (*TCPConn, error) {
 }
 
 func (w *TCPWrapper) Listen(network, address string) (*TCPConn, error) {
-	listener, err := net.Listen(network, address)
+	err := w.xdp.prog.SetServerMode()
 	if err != nil {
 		return nil, err
 	}
 
-	laddr, ok := listener.Addr().(*net.TCPAddr)
-	if !ok {
-		return nil, fmt.Errorf("Local address is not a TCP")
+	laddr, err := net.ResolveTCPAddr("tcp", address)
+	if err != nil {
+		return nil, err
+	}
+	w.xdp.prog.AddToWhitelist(laddr.IP, laddr.Port)
+
+	listener, err := net.Listen(network, address)
+	if err != nil {
+		return nil, err
 	}
 
 	tcpconn := &TCPConn{
@@ -326,9 +354,19 @@ func (w *TCPWrapper) Listen(network, address string) (*TCPConn, error) {
 		key:       ebpf.GetKey(laddr.IP, laddr.Port),
 		opts:      &w.opts,
 		getBuffer: w.getBuffer,
+		getHeader: func(ip net.IP, port int) []byte {
+			return w.xdp.prog.GetConntrackData(ip, port)
+		},
+		getConnected: func() []uint64 {
+			keys := make([]uint64, 0)
+			w.conns.Range(func(key uint64, conn *TCPConn) bool {
+				keys = append(keys, key)
+				return true
+			})
+			return keys
+		},
 		closeFunc: w.conns.Delete,
 	}
-	w.xdp.prog.AddToWhitelist(laddr.IP, laddr.Port)
 
 	go func() {
 		for {
@@ -337,14 +375,13 @@ func (w *TCPWrapper) Listen(network, address string) (*TCPConn, error) {
 				return
 			}
 
-			raddr, ok := conn.LocalAddr().(*net.TCPAddr)
+			raddr, ok := conn.RemoteAddr().(*net.TCPAddr)
 			if !ok {
 				return
 			}
 
-			log.Printf("accepted connection from %s:%d\n", raddr.IP, raddr.Port)
+			log.Printf("accpeted connection: %s", raddr)
 			w.conns.Set(ebpf.GetKey(raddr.IP, raddr.Port), tcpconn)
-
 			go io.Copy(io.Discard, conn)
 		}
 	}()

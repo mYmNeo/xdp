@@ -4,9 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"time"
+
+	"github.com/mYmNeo/xdp/ebpf"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -15,8 +16,7 @@ import (
 var _ net.PacketConn = (*TCPConn)(nil)
 
 var (
-	errTimeout   = errors.New("timeout")
-	errNotEnough = errors.New("not enough")
+	errTimeout = errors.New("timeout")
 )
 
 func (conn *TCPConn) ReadFrom(p []byte) (n int, addr net.Addr, err error) {
@@ -73,10 +73,13 @@ func (conn *TCPConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 
 	ethFrame.SrcMAC, ethFrame.DstMAC = ethFrame.DstMAC, ethFrame.SrcMAC
 	ipFrame.SrcIP, ipFrame.DstIP = ipFrame.DstIP, ipFrame.SrcIP
-	ipFrame.TOS = conn.dscp
+	ipFrame.TTL = 64
+	ipFrame.TOS = uint8(conn.dscp)
 
 	tcpFrame.SrcPort, tcpFrame.DstPort = tcpFrame.DstPort, tcpFrame.SrcPort
 	tcpFrame.SetNetworkLayerForChecksum(ipFrame)
+	tcpFrame.Seq, tcpFrame.Ack = tcpFrame.Ack, tcpFrame.Seq
+	tcpFrame.SYN = false
 	tcpFrame.PSH = true
 	tcpFrame.ACK = true
 
@@ -86,9 +89,6 @@ func (conn *TCPConn) WriteTo(p []byte, addr net.Addr) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
-
-	pkt = gopacket.NewPacket(buf.Bytes(), layers.LayerTypeEthernet, gopacket.Default)
-	log.Printf("pkt: %v", pkt)
 
 	select {
 	case <-deadline:
@@ -143,7 +143,15 @@ func (conn *TCPConn) SetWriteDeadline(t time.Time) error {
 }
 
 func (conn *TCPConn) SetDSCP(dscp int) error {
-	conn.dscp = uint8(dscp << 2)
-	// conn.ipHeader.TOS =
+	conn.dscp = dscp << 2
 	return nil
+}
+
+func (conn *TCPConn) GetClients() []net.Addr {
+	addrs := make([]net.Addr, 0)
+	for _, key := range conn.getConnected() {
+		ip, port := ebpf.RetrieveIPPort(key)
+		addrs = append(addrs, &net.TCPAddr{IP: ip, Port: port})
+	}
+	return addrs
 }

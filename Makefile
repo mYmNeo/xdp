@@ -1,7 +1,7 @@
 .PHONY: format
 
 format:
-	clang-format -i --style="{BasedOnStyle: Google, IndentWidth: 4}" ebpf/*.c ebpf/include/bpf/*.h
+	clang-format -i --style="{BasedOnStyle: Google, IndentWidth: 2}" ebpf/*.c ebpf/include/bpf/*.h
 
 .PHONY: build
 

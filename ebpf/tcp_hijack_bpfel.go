@@ -61,6 +61,7 @@ type tcp_hijackProgramSpecs struct {
 // It can be passed ebpf.CollectionSpec.Assign.
 type tcp_hijackMapSpecs struct {
 	ConntrackMap *ebpf.MapSpec `ebpf:"conntrack_map"`
+	ModeMap      *ebpf.MapSpec `ebpf:"mode_map"`
 	QidconfMap   *ebpf.MapSpec `ebpf:"qidconf_map"`
 	WhitelistMap *ebpf.MapSpec `ebpf:"whitelist_map"`
 	XsksMap      *ebpf.MapSpec `ebpf:"xsks_map"`
@@ -86,6 +87,7 @@ func (o *tcp_hijackObjects) Close() error {
 // It can be passed to loadTcp_hijackObjects or ebpf.CollectionSpec.LoadAndAssign.
 type tcp_hijackMaps struct {
 	ConntrackMap *ebpf.Map `ebpf:"conntrack_map"`
+	ModeMap      *ebpf.Map `ebpf:"mode_map"`
 	QidconfMap   *ebpf.Map `ebpf:"qidconf_map"`
 	WhitelistMap *ebpf.Map `ebpf:"whitelist_map"`
 	XsksMap      *ebpf.Map `ebpf:"xsks_map"`
@@ -94,6 +96,7 @@ type tcp_hijackMaps struct {
 func (m *tcp_hijackMaps) Close() error {
 	return _Tcp_hijackClose(
 		m.ConntrackMap,
+		m.ModeMap,
 		m.QidconfMap,
 		m.WhitelistMap,
 		m.XsksMap,
